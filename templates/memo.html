@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>네이버 지도 + 매장 정보</title>
+  <script src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=gqlyvxn39j"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+
+    /* 전체 래퍼 */
+    #container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      position: relative;
+    }
+
+    /* 사이드바 */
+    #sidebar {
+      width: 320px;
+      height: 100%;
+      background: #f7f7f7;
+      padding: 12px;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+      z-index: 10;
+      overflow-y: auto;
+    }
+
+    #sidebar.show {
+      transform: translateX(0);
+    }
+
+    /* 지도 */
+    #map {
+      flex: 1;
+      height: 100%;
+      transition: margin-left 0.3s ease;
+    }
+
+    /* 사이드바 열렸을 때 지도 밀림 */
+    #map.shift {
+      margin-left: 320px;
+    }
+
+    /* 목록 버튼 */
+    #toggleBtn {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: #2a82ff;
+      color: white;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      z-index: 999;
+      transition: all 0.3s ease;
+    }
+
+    #toggleBtn:hover {
+      background: #1c63ce;
+    }
+
+    /* 사이드바 열릴 때 버튼 이동 */
+    #toggleBtn.move {
+      left: 332px; /* 320 + 여백 */
+    }
+
+    /* 매장 카드 */
+    .store-item {
+      padding: 10px;
+      margin-bottom: 10px;
+      background: white;
+      border-radius: 6px;
+      border: 1px solid #ddd;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .store-item:hover {
+      background: #f0f4ff;
+    }
+
+    .store-item.active {
+      border-color: red;
+      background: #ffecec;
+    }
+
+    /* 줌아웃 버튼 */
+    #zoomOutBtn {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 30px;
+      background: #2a82ff;
+      color: white;
+      border-radius: 30px;
+      border: none;
+      cursor: pointer;
+      z-index: 999;
+    }
+
+    #zoomOutBtn:hover {
+      background: #1c63ce;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="container">
+
+  <!-- 사이드바 -->
+  <div id="sidebar">
+    <h3>📍 지역 선택</h3>
+    <select id="regionSelect" style="width:100%; padding:8px;">
+      <option value="37.2071,127.0331">화성 병점</option>
+      <option value="37.2655,127.0000">수원역</option>
+      <option value="37.4979,127.0276">강남역</option>
+    </select>
+
+    <h3 style="margin-top:12px;">🏪 매장 목록</h3>
+    <div id="store-list"></div>
+  </div>
+
+  <!-- 지도 -->
+  <div id="map"></div>
+
+  <!-- 버튼 -->
+  <button id="toggleBtn">목록</button>
+  <button id="zoomOutBtn">지도 축소</button>
+</div>
+
+<script>
+const sidebar = document.getElementById("sidebar");
+const mapDiv = document.getElementById("map");
+const toggleBtn = document.getElementById("toggleBtn");
+const zoomOutBtn = document.getElementById("zoomOutBtn");
+const storeList = document.getElementById("store-list");
+
+const DEFAULT_CENTER = new naver.maps.LatLng(37.2069,127.0332);
+const DEFAULT_ZOOM = 16;
+const FOCUS_ZOOM = 19;
+
+let markers = [];
+let activeMarker = null;
+
+/* 지도 생성 */
+const map = new naver.maps.Map("map", {
+  center: DEFAULT_CENTER,
+  zoom: DEFAULT_ZOOM
+});
+
+/* 사이드바 토글 */
+function toggleSidebar() {
+  sidebar.classList.toggle("show");
+  mapDiv.classList.toggle("shift");
+  toggleBtn.classList.toggle("move");
+  setTimeout(() => map.refresh(), 400);
+}
+
+toggleBtn.onclick = toggleSidebar;
+
+/* 줌아웃 */
+zoomOutBtn.onclick = () => {
+  map.morph(DEFAULT_CENTER, DEFAULT_ZOOM);
+  resetFocus();
+
+  sidebar.classList.remove("show");
+  mapDiv.classList.remove("shift");
+  toggleBtn.classList.remove("move");
+
+  setTimeout(() => map.refresh(), 300);
+};
+
+/* 사용자 위치 */
+let userMarker = new naver.maps.Marker({
+  map,
+  visible:false,
+  icon: {
+    content:`<div style="width:18px;height:18px;background:#2a82ff;border-radius:50%;border:2px solid white;"></div>`,
+    anchor: new naver.maps.Point(9,9)
+  }
+});
+
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(pos=>{
+    userMarker.setPosition(new naver.maps.LatLng(pos.coords.latitude,pos.coords.longitude));
+    userMarker.setVisible(true);
+  });
+}
+
+/* 마커 스타일 */
+const redIcon = {
+  content:`<div style="width:14px;height:14px;background:red;border-radius:50%;border:2px solid white"></div>`,
+  anchor:new naver.maps.Point(7,7)
+};
+
+const ringIcon = {
+  content:`<div style="width:24px;height:24px;border:3px solid red;border-radius:50%;background:rgba(255,0,0,0.1)"></div>`,
+  anchor:new naver.maps.Point(12,12)
+};
+
+function resetFocus() {
+  if(activeMarker){
+    activeMarker.setIcon(redIcon);
+    activeMarker = null;
+  }
+  document.querySelectorAll(".store-item").forEach(el=>el.classList.remove("active"));
+}
+
+/* 지역 변경 */
+document.getElementById("regionSelect").onchange = (e)=>{
+  const [lat,lng] = e.target.value.split(",").map(Number);
+  map.morph(new naver.maps.LatLng(lat,lng), DEFAULT_ZOOM);
+  resetFocus();
+};
+
+/* 매장 로드 */
+fetch("/api/stores")
+.then(r=>r.json())
+.then(stores=>{
+
+  /* 리스트 */
+  stores.forEach((store,idx)=>{
+    const div = document.createElement("div");
+    div.className = "store-item";
+    div.id = "store-"+idx;
+    div.innerHTML = `<h4>${store.name}</h4><p>${store.address}</p>`;
+    storeList.appendChild(div);
+
+    div.onclick = ()=>{
+      sidebar.classList.add("show");
+      mapDiv.classList.add("shift");
+      toggleBtn.classList.add("move");
+
+      highlightStore(idx);
+
+      const pos = new naver.maps.LatLng(store.latitude, store.longitude);
+      map.morph(pos, FOCUS_ZOOM);
+
+      if(activeMarker && activeMarker!==markers[idx]) {
+        activeMarker.setIcon(redIcon);
+      }
+
+      markers[idx].setIcon(ringIcon);
+      activeMarker = markers[idx];
+
+      setTimeout(()=>map.refresh(),300);
+    };
+  });
+
+  /* 마커 */
+  stores.forEach((store,idx)=>{
+    const marker = new naver.maps.Marker({
+      position:new naver.maps.LatLng(store.latitude,store.longitude),
+      map,
+      icon:redIcon
+    });
+
+    markers.push(marker);
+
+    naver.maps.Event.addListener(marker,"click",()=>{
+      sidebar.classList.add("show");
+      mapDiv.classList.add("shift");
+      toggleBtn.classList.add("move");
+
+      highlightStore(idx);
+
+      if(activeMarker && activeMarker!==marker) {
+        activeMarker.setIcon(redIcon);
+      }
+
+      marker.setIcon(ringIcon);
+      activeMarker = marker;
+
+      map.morph(marker.getPosition(),FOCUS_ZOOM);
+
+      setTimeout(()=>map.refresh(),300);
+    });
+  });
+
+  function highlightStore(idx){
+    stores.forEach((_,i)=>{
+      const el = document.getElementById("store-"+i);
+      if(!el) return;
+      if(i===idx){
+        el.classList.add("active");
+        el.scrollIntoView({behavior:"smooth",block:"center"});
+      } else {
+        el.classList.remove("active");
+      }
+    });
+  }
+
+});
+</script>
+
+</body>
+</html>
