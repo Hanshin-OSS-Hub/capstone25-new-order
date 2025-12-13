@@ -63,6 +63,7 @@ Flutter + Flask 기반 **매장 식사 / 포장 주문 / 원격 결제 통합 �
 - **Backend**
   - Python, Flask
   - JWT 기반 인증
+  - 현재는 SQLite(개발용) 사용 중, 배포는 MySQL 예정
 - **외부 서비스**
   - 네이버 지도 API
 - **협업 & 버전 관리**
@@ -70,28 +71,66 @@ Flutter + Flask 기반 **매장 식사 / 포장 주문 / 원격 결제 통합 �
 
 ---
 
-## 5. 디렉토리 구조
+## 5. 실행 방법
+
+### 5-1. Flutter 앱 실행
+
+```bash
+# 프로젝트 클론
+git clone https://github.com/Hanshin-OSS-Hub/capstone25-new-order.git
+cd capstone25-new-order
+
+# 패키지 설치
+flutter pub get
+
+# 에뮬레이터 또는 실제 기기에서 실행
+flutter run
+
+### Flask 백엔드 서버 실행
+
+cd server
+
+# 가상환경 생성 (선택)
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 패키지 설치
+pip install -r requirements.txt
+
+# 서버 실행
+python app.py
+
+---
+
+## 6. 디렉토리 구조
 
 ※ 현재 구조 기준 예시입니다. 이후 `frontend/`, `backend/`로 나눌 예정입니다.
 
-```text
 capstone25-new-order/
-  android/
-  ios/
-  lib/
-  web/
-  test/
-  pubspec.yaml
-  pubspec.lock
-  app.py              # Flask 진입점
-  config.py
-  jwt_config.py
-  jwt_middleware.py
-  jwt_utils.py
-  models.py
-  JWT/
-  templates/
-  README.md
-  .gitignore
+├─ lib/                     # Flutter 앱 소스 코드
+│  ├─ main.dart
+│  ├─ screens/              # 화면 단위 위젯들
+│  ├─ widgets/              # 공용 UI 컴포넌트
+│  └─ models/               # 데이터 모델
+│
+├─ assets/                  # 이미지, 아이콘 등
+│
+├─ android/                 # Android 빌드 관련
+├─ ios/                     # iOS 빌드 관련
+├─ pubspec.yaml
+│
+├─ server/                  # Flask 백엔드 서버
+│  ├─ app.py                # Flask 엔트리 포인트
+│  ├─ config.py             # DB/환경 설정
+│  ├─ models.py             # DB 모델
+│  ├─ requirements.txt      # Python 패키지 목록
+│  └─ templates/
+│     └─ index.html         # 네이버 지도 WebView 페이지
+│
+├─ docs/                    # 보고서, 시스템 구성도, 스크린샷
+│
+└─ README.md
+
+---
 
 
