@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>병점 음식점 지도</title>
+<script type="text/javascript" src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=gqlyvxn39j&submodules=geometry"></script>
+<style>
+* { box-sizing: border-box; font-family: 'Malgun Gothic', sans-serif; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+#map { width: 100%; height: 100%; }
+
+/* 검색창 */
+#searchBox {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    width: calc(100% - 40px); max-width: 450px; display: flex; z-index: 1000;
+    border-radius: 30px; overflow: hidden; background: white;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+}
+#searchInput { flex: 1; padding: 14px 20px; border: 2px solid transparent; border-radius: 30px 0 0 30px; font-size: 15px; outline: none; }
+#searchInput:focus { border-color: #4CAF50; }
+#searchBtn { width: 80px; background: #4CAF50; color: white; border: none; border-radius: 0 30px 30px 0; font-weight: bold; cursor: pointer; }
+
+/* 사이드바 */
+#sidebar {
+    position: fixed; bottom: 0; left: 50%; transform: translateX(-50%) translateY(100%);
+    width: calc(100% - 40px); max-width: 450px; height: 45%; background: white;
+    border-radius: 25px 25px 0 0; box-shadow: 0 -5px 25px rgba(0,0,0,0.2);
+    transition: transform 0.3s; z-index: 999; display: flex; flex-direction: column; overflow: hidden;
+}
+#sidebar.show { transform: translateX(-50%) translateY(0); }
+.sidebar-header { padding: 18px 20px 10px; background: white; border-bottom: 1px solid #eee; }
+.sidebar-header h3 { margin: 0 0 12px; font-size: 18px; display: flex; justify-content: space-between; align-items: center; }
+.store-count { background: #4CAF50; color: white; padding: 3px 10px; border-radius: 20px; font-size: 13px; }
+#sortSelect { width: 100%; padding: 12px 15px; border: 1px solid #ddd; border-radius: 12px; font-size: 14px; cursor: pointer; }
+#storeList { flex: 1; overflow-y: auto; padding: 15px 20px; background: #fafafa; }
+
+/* 매장 아이템 */
+.store { background: white; padding: 15px; margin-bottom: 10px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.2s; }
+.store:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(76,175,80,0.15); }
+.store.selected { border: 1px solid #4CAF50; background: #f1f8e9; }
+.store-name { font-size: 16px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+.store-category { background: #e8f5e9; color: #4CAF50; padding: 3px 10px; border-radius: 20px; font-size: 12px; }
+.store-address { font-size: 13px; color: #666; margin-top: 5px; }
+.store-phone { font-size: 12px; color: #999; margin-top: 3px; }
+
+/* 마커 */
+.user-marker { background: #4285F4; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.store-marker { background: #FF5722; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.2); cursor: pointer; transition: transform 0.2s; }
+.store-marker:hover { transform: scale(1.2); background: #ff7043; }
+
+/* 경로 정보창 */
+.route-info { padding: 15px; min-width: 200px; }
+.route-info .store-name { color: #4CAF50; font-size: 16px; margin-bottom: 10px; }
+.route-info-item { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
+
+.loading { text-align: center; padding: 30px; color: #999; }
+.toggle-btn { position: absolute; top: -30px; left: 50%; transform: translateX(-50%); background: white; width: 50px; height: 30px; border-radius: 30px 30px 0 0; display: flex; justify-content: center; align-items: center; cursor: pointer; font-size: 18px; }
+
+/* 툴팁 */
+.custom-tooltip {
+    position: absolute; background: rgba(0,0,0,0.85); color: white; padding: 8px 14px;
+    border-radius: 10px; font-size: 12px; font-weight: bold; white-space: nowrap;
+    pointer-events: auto; cursor: pointer; z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    transition: all 0.2s; backdrop-filter: blur(4px);
+}
+.custom-tooltip:hover { background: #4CAF50; transform: scale(1.02); }
+.custom-tooltip small { display: block; font-size: 10px; color: #ddd; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="searchBox">
+    <input id="searchInput" placeholder="음식점 이름 또는 주소 검색">
+    <button id="searchBtn">검색</button>
+</div>
+
+<div id="sidebar">
+    <div class="toggle-btn" onclick="toggleSidebar()">▼</div>
+    <div class="sidebar-header">
+        <h3>병점역 주변 맛집<span class="store-count" id="storeCount">0</span></h3>
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <select id="sortSelect">
+                <option value="sim">정확순</option>
+                <option value="date">최신순</option>
+                <option value="distance">거리순</option>
+            </select>
+            <button id="resetBtn" style="background:#f5f5f5;border:1px solid #ddd;border-radius:12px;padding:0 15px;font-size:13px;font-weight:bold;color:#666;cursor:pointer;white-space:nowrap;">📍 내 위치로</button>
+        </div>
+    </div>
+    <div id="storeList"></div>
+</div>
+
+<script>
+// 전역 변수
+let map, userMarker, userPos = null, isLocationReady = false;
+let markers = [], currentRouteLine = null, currentInfoWindow = null, allStores = [];
+let currentTooltip = null, tooltipHideTimeout = null;
+
+// 지도 초기화
+function initMap() {
+    map = new naver.maps.Map('map', {
+        center: new naver.maps.LatLng(37.2075, 127.0336),
+        zoom: 15
+    });
+    naver.maps.Event.addListener(map, 'click', () => {
+        if (currentInfoWindow) currentInfoWindow.close();
+        removeTooltip();
+    });
+}
+
+// 툴팁 관리
+function removeTooltip() {
+    if (tooltipHideTimeout) clearTimeout(tooltipHideTimeout);
+    if (currentTooltip && currentTooltip.parentNode) {
+        currentTooltip.parentNode.removeChild(currentTooltip);
+        currentTooltip = null;
+    }
+}
+function hideTooltip() {
+    if (tooltipHideTimeout) clearTimeout(tooltipHideTimeout);
+    tooltipHideTimeout = setTimeout(() => {
+        if (currentTooltip && !currentTooltip._isHovered) removeTooltip();
+    }, 150);
+}
+function showTooltip(content, latLng, storeData) {
+    removeTooltip();
+    if (!map) return;
+    try {
+        let point = map.getProjection().fromCoordToOffset(latLng);
+        let tooltip = document.createElement('div');
+        tooltip.className = 'custom-tooltip';
+        tooltip.innerHTML = content + '<small>🔍 클릭하면 자세히 보기</small>';
+        tooltip.style.left = (point.x - 70) + 'px';
+        tooltip.style.top = (point.y - 50) + 'px';
+        tooltip.onmouseenter = () => { if (tooltipHideTimeout) clearTimeout(tooltipHideTimeout); tooltip._isHovered = true; };
+        tooltip.onmouseleave = () => { tooltip._isHovered = false; hideTooltip(); };
+        tooltip.onclick = () => window.open(`https://map.naver.com/v5/search/${encodeURIComponent(storeData.name + ' 병점역')}`, '_blank');
+        document.body.appendChild(tooltip);
+        currentTooltip = tooltip;
+        tooltip._isHovered = false;
+        if (tooltipHideTimeout) clearTimeout(tooltipHideTimeout);
+    } catch(e) {}
+}
+
+// 매장 표시
+function displayStores(stores) {
+    markers.forEach(m => m.setMap(null));
+    markers = [];
+    let list = document.getElementById("storeList");
+    list.innerHTML = "";
+    document.getElementById("storeCount").textContent = stores.length;
+
+    stores.forEach(store => {
+        let pos = new naver.maps.LatLng(Number(store.lat), Number(store.lng));
+        let marker = new naver.maps.Marker({
+            position: pos, map: map,
+            icon: { content: '<div class="store-marker"></div>', size: new naver.maps.Size(22, 22), anchor: new naver.maps.Point(11, 11) },
+            title: store.name
+        });
+        
+        // 마커 호버 시 실시간 거리 계산
+        naver.maps.Event.addListener(marker, 'mouseover', () => {
+            let content = `<strong>${store.name}</strong><br>`;
+            if (userPos && naver.maps.geometry) {
+                let dist = naver.maps.geometry.spherical.computeDistanceBetween(userPos, pos);
+                content += `📏 ${dist < 1000 ? `${Math.round(dist)}m` : `${(dist/1000).toFixed(1)}km`}<br>`;
+            }
+            if (store.category) content += `🏷️ ${store.category}`;
+            showTooltip(content, pos, store);
+        });
+        naver.maps.Event.addListener(marker, 'mouseout', hideTooltip);
+        naver.maps.Event.addListener(marker, 'click', () => selectStore(store));
+        markers.push(marker);
+
+        // 리스트 아이템 (초기 거리 표시용)
+        let initDist = '';
+        if (userPos && naver.maps.geometry) {
+            let d = naver.maps.geometry.spherical.computeDistanceBetween(userPos, pos);
+            initDist = d < 1000 ? `${Math.round(d)}m` : `${(d/1000).toFixed(1)}km`;
+        }
+        let div = document.createElement("div");
+        div.className = "store";
+        div.innerHTML = `
+            <div class="store-name">${store.name} ${initDist ? `<span style="margin-left:5px;color:#4CAF50;">${initDist}</span>` : ''}${store.category ? `<span class="store-category">${store.category}</span>` : ''}</div>
+            <div class="store-address">📍 ${store.address || '주소 정보 없음'}</div>
+            ${store.phone ? `<div class="store-phone">📞 ${store.phone}</div>` : ''}
+        `;
+        div.onclick = () => {
+            selectStore(store);
+            document.querySelectorAll('.store').forEach(i => i.classList.remove('selected'));
+            div.classList.add('selected');
+        };
+        list.appendChild(div);
+    });
+    document.getElementById("sidebar").classList.add("show");
+}
+
+// 거리순 정렬
+function sortStoresByDistance() {
+    if (!userPos || !allStores.length) return;
+    let withDist = allStores.map(s => ({ ...s, distance: naver.maps.geometry.spherical.computeDistanceBetween(userPos, new naver.maps.LatLng(s.lat, s.lng)) }));
+    withDist.sort((a,b) => a.distance - b.distance);
+    displayStores(withDist);
+}
+
+// 매장 선택
+function selectStore(store) {
+    if (!isLocationReady) return alert("위치 정보를 불러오는 중입니다. 잠시 후 다시 선택해주세요.");
+    let pos = new naver.maps.LatLng(Number(store.lat), Number(store.lng));
+    map.morph(pos, 17);
+    drawRoute(pos, store);
+}
+
+// 경로 그리기
+function drawRoute(dest, store) {
+    if (!userPos) return;
+    if (currentRouteLine) currentRouteLine.setMap(null);
+    if (currentInfoWindow) currentInfoWindow.close();
+
+    currentRouteLine = new naver.maps.Polyline({
+        map: map, path: [userPos, dest],
+        strokeColor: '#4CAF50', strokeWeight: 5, strokeOpacity: 0.9
+    });
+    
+    // 동선 호버 시 실시간 거리 계산
+    naver.maps.Event.addListener(currentRouteLine, 'mouseover', () => {
+        if (!userPos) return;
+        let dist = naver.maps.geometry.spherical.computeDistanceBetween(userPos, dest);
+        let distText = dist < 1000 ? `${Math.round(dist)}m` : `${(dist/1000).toFixed(1)}km`;
+        let mid = new naver.maps.LatLng((userPos.lat()+dest.lat())/2, (userPos.lng()+dest.lng())/2);
+        showTooltip(`<strong>${store.name}</strong><br>📏 거리: ${distText}<br>🚶 도보: ${Math.round(dist/67)}분`, mid, store);
+    });
+    naver.maps.Event.addListener(currentRouteLine, 'mouseout', hideTooltip);
+
+    let dist = naver.maps.geometry.spherical.computeDistanceBetween(userPos, dest);
+    let info = new naver.maps.InfoWindow({
+        content: `<div class="route-info"><div class="store-name">${store.name}</div>
+                  <div class="route-info-item">📏 거리: ${dist < 1000 ? `${Math.round(dist)}m` : `${(dist/1000).toFixed(1)}km`}</div>
+                  <div class="route-info-item">🚶 도보: ${Math.round(dist/67)}분</div>
+                  <div style="font-size:11px;color:#999;margin-top:8px;">🔍 동선 위에 마우스를 올려보세요</div></div>`,
+        borderWidth: 0, backgroundColor: 'white', borderRadius: '12px'
+    });
+    info.open(map, dest);
+    currentInfoWindow = info;
+}
+
+// 데이터 로드
+function loadStores() {
+    document.getElementById('storeList').innerHTML = '<div class="loading">매장 정보를 불러오는 중</div>';
+    let sort = document.getElementById("sortSelect").value;
+    fetch(`/api/stores?sort=${sort}`)
+        .then(res => res.json())
+        .then(data => {
+            allStores = data.stores || data;
+            if (sort === 'distance' && userPos) sortStoresByDistance();
+            else displayStores(allStores);
+        })
+        .catch(() => document.getElementById('storeList').innerHTML = '<div style="text-align:center;padding:30px;color:#f44336;">데이터를 불러올 수 없습니다.</div>');
+}
+
+// 사용자 위치
+function loadUserLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            pos => {
+                userPos = new naver.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+                isLocationReady = true;
+                userMarker = new naver.maps.Marker({
+                    position: userPos, map: map,
+                    icon: { content: '<div class="user-marker"></div>', size: new naver.maps.Size(26, 26), anchor: new naver.maps.Point(13, 13) },
+                    title: '내 위치', zIndex: 100
+                });
+                map.setCenter(userPos);
+                if (document.getElementById('sortSelect').value === 'distance') sortStoresByDistance();
+            },
+            () => { userPos = new naver.maps.LatLng(37.2075, 127.0336); isLocationReady = true; }
+        );
+    } else {
+        userPos = new naver.maps.LatLng(37.2075, 127.0336);
+        isLocationReady = true;
+    }
+}
+
+// 내 위치로 이동
+function moveToMyLocation() {
+    if (!isLocationReady) return alert("위치 정보를 불러오는 중입니다.");
+    if (!userPos) return;
+    map.setCenter(userPos);
+    map.setZoom(15);
+    if (userMarker) {
+        let orig = userMarker.getIcon();
+        userMarker.setIcon({ content: '<div class="user-marker" style="background:#FF5722;transform:scale(1.2);"></div>', size: new naver.maps.Size(26,26), anchor: new naver.maps.Point(13,13) });
+        setTimeout(() => userMarker.setIcon(orig), 300);
+    }
+    document.querySelectorAll('.store').forEach(i => i.classList.remove('selected'));
+    if (currentRouteLine) { currentRouteLine.setMap(null); currentRouteLine = null; }
+    if (currentInfoWindow) { currentInfoWindow.close(); currentInfoWindow = null; }
+    removeTooltip();
+}
+
+// 검색
+function performSearch() {
+    let kw = document.getElementById("searchInput").value.trim();
+    if (!kw) return;
+    let filtered = allStores.filter(s => s.name.includes(kw) || (s.address && s.address.includes(kw)));
+    if (filtered.length) displayStores(filtered);
+}
+
+function toggleSidebar() {
+    let sidebar = document.getElementById('sidebar');
+    let btn = document.querySelector('.toggle-btn');
+    if (sidebar.classList.contains('show')) {
+        sidebar.classList.remove('show');
+        btn.innerHTML = '▲';
+    } else {
+        sidebar.classList.add('show');
+        btn.innerHTML = '▼';
+    }
+}
+
+// 페이지 로드
+document.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    loadUserLocation();
+    loadStores();
+    document.getElementById('resetBtn').onclick = moveToMyLocation;
+    document.getElementById('resetBtn').onmouseover = function() { this.style.background='#e8f5e9'; this.style.borderColor='#4CAF50'; this.style.color='#4CAF50'; };
+    document.getElementById('resetBtn').onmouseout = function() { this.style.background='#f5f5f5'; this.style.borderColor='#ddd'; this.style.color='#666'; };
+});
+
+document.getElementById("sortSelect").onchange = function() {
+    if (this.value === 'distance' && userPos) sortStoresByDistance();
+    else loadStores();
+};
+document.getElementById("searchBtn").onclick = performSearch;
+document.getElementById("searchInput").onkeypress = e => { if (e.key === 'Enter') performSearch(); };
+</script>
+</body>
+</html>
