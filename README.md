@@ -25,6 +25,6 @@ py app.py
 
 JWT/DB 서버 실행 방법
 Docker Desktop 실행
-cd C:\Users\wooji\Downloads\jwt_docker
+cd JWT_도커_폴더
 docker compose up --build
 
