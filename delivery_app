@@ -1,0 +1,132 @@
+# app_db.py
+import os
+from flask import Flask, jsonify, request, abort
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from datetime import datetime
+import json
+from sqlalchemy import func, or_
+
+# -----------------------------------------------------
+# 1. Flask 애플리케이션 초기화
+# -----------------------------------------------------
+app = Flask(__name__)
+
+# -----------------------------------------------------
+# 2. DB 연결 설정
+# -----------------------------------------------------
+# 데이터베이스 URI 설정 (환경 변수에서 가져오거나 기본값 사용)
+database_uri = os.environ.get('DATABASE_URL', 'sqlite:///stores.db')
+if database_uri.startswith('postgres://'):
+    database_uri = database_uri.replace('postgres://', 'postgresql://', 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_uri
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ECHO'] = True  # SQL 로깅 (개발용)
+
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)  # 마이그레이션 지원
+
+# -----------------------------------------------------
+# 3. Store 모델 정의 (확장된 버전)
+# -----------------------------------------------------
+class Store(db.Model):
+    __tablename__ = 'stores'
+    
+    # 기본 정보
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, index=True)
+    address = db.Column(db.String(200), index=True)
+    old_address = db.Column(db.String(200))  # 지번 주소
+    phone = db.Column(db.String(20))
+    category = db.Column(db.String(50), index=True)  # 음식점 카테고리
+    
+    # 위치 정보
+    latitude = db.Column(db.Float)  # 위도
+    longitude = db.Column(db.Float)  # 경도
+    
+    # 상세 정보
+    description = db.Column(db.Text)
+    business_hours = db.Column(db.String(200))  # 영업 시간
+    closed_days = db.Column(db.String(100))  # 휴무일
+    price_range = db.Column(db.String(50))  # 가격대
+    
+    # 추가 정보
+    rating = db.Column(db.Float, default=0.0)  # 평점
+    review_count = db.Column(db.Integer, default=0)  # 리뷰 수
+    naver_place_url = db.Column(db.String(500))  # 네이버 플레이스 URL
+    
+    # 메타 정보
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True)  # 삭제 표시
+    
+    def to_dict(self, include_distance=False, user_lat=None, user_lng=None):
+        """Store 객체를 딕셔너리로 변환"""
+        data = {
+            "id": self.id,
+            "name": self.name,
+            "address": self.address or self.old_address,
+            "old_address": self.old_address,
+            "phone": self.phone,
+            "category": self.category,
+            "lat": self.latitude,
+            "lng": self.longitude,
+            "description": self.description,
+            "business_hours": self.business_hours,
+            "closed_days": self.closed_days,
+            "price_range": self.price_range,
+            "rating": self.rating,
+            "review_count": self.review_count,
+            "naver_place_url": self.naver_place_url,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+        
+        # 사용자 위치 기반 거리 계산
+        if include_distance and user_lat and user_lng and self.latitude and self.longitude:
+            from math import radians, sin, cos, sqrt, atan2
+            
+            # Haversine formula
+            R = 6371  # Earth's radius in kilometers
+            
+            lat1, lon1 = radians(user_lat), radians(user_lng)
+            lat2, lon2 = radians(self.latitude), radians(self.longitude)
+            
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            
+            a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+            c = 2 * atan2(sqrt(a), sqrt(1-a))
+            
+            distance = R * c
+            data["distance"] = round(distance, 3)  # km 단위, 소수점 3자리
+        
+        return data
+    
+    def __repr__(self):
+        return f'<Store {self.id}: {self.name}>'
+
+# -----------------------------------------------------
+# 4. 리뷰 모델 (추가 기능)
+# -----------------------------------------------------
+class Review(db.Model):
+    __tablename__ = 'reviews'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey('stores.id'), nullable=False)
+    user_name = db.Column(db.String(50))
+    rating = db.Column(db.Integer)  # 1-5
+    content = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # 관계 설정
+    store = db.relationship('Store', backref=db.backref('reviews', lazy='dynamic'))
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "store_id": self.store_id,
+            "user_name": self.user_name,
+            "rating": self.rating,
+            "content": self.content,
+            "created_at": self.created_at.isoformat() if self.created_at
